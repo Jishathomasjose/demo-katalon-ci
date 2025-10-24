@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TestCaseEntity>
+   <description></description>
+   <name>TC2_PunchInandOut</name>
+   <tag></tag>
+   <comment></comment>
+   <recordOption>OTHER</recordOption>
+   <testCaseGuid>cbbe5fd6-b8d2-4a0c-81e2-d57fb59bd0f2</testCaseGuid>
+</TestCaseEntity>
