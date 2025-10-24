@@ -2,8 +2,12 @@ pipeline {
   agent any
 
   environment {
-    // Test suite inside your project (adjust if your suite name / path differs)
-    TEST_SUITE_PATH = "Test Suites/TS_SmokeTests"
+    // Optional override: set this in the job config or pipeline params if katalon is installed elsewhere
+    KATALON_BIN = '' 
+    // Optional: path to katalon installation dir (if you prefer)
+    KATALON_HOME = ''
+    PROJECT_PATTERN = '**/*.prj'
+    REPORT_DIR = 'Reports'
   }
 
   stages {
@@ -13,7 +17,7 @@ pipeline {
       }
     }
 
-    stage('Run Katalon Tests (detect katalonc in Downloads)') {
+    stage('Run Katalon Tests (detect katalonc)') {
       steps {
         sh '''
           set -euo pipefail
@@ -22,102 +26,104 @@ pipeline {
           pwd
           ls -la
 
-          # 1) Find the .prj file in the workspace (first match)
-          PRJ_FILE=$(find "${WORKSPACE}" -maxdepth 4 -type f -name "*.prj" | head -n 1 || true)
-          if [ -z "${PRJ_FILE}" ]; then
-            echo "ERROR: No .prj file found in workspace. Please ensure the Katalon project (.prj) is in the repository root or adjust the path."
-            echo "You can verify with: find ${WORKSPACE} -type f -name '*.prj'"
-            exit 2
-          fi
-          echo "Found project file: ${PRJ_FILE}"
-          PROJECT_ABS="$(cd "$(dirname "${PRJ_FILE}")" && pwd)/$(basename "${PRJ_FILE}")"
-          echo "Resolved PROJECT_PATH=${PROJECT_ABS}"
+          # try explicit env overrides first (support job config)
+          if [ -n "${KATALON_BIN}" ]; then
+            echo "KATALON_BIN override provided: ${KATALON_BIN}"
+            if [ -x "${KATALON_BIN}" ]; then
+              KATALON_EXEC="${KATALON_BIN}"
+            else
+              echo "ERROR: KATALON_BIN is set but not executable: ${KATALON_BIN}"
+              exit 3
+            fi
+          elif [ -n "${KATALON_HOME}" ]; then
+            echo "KATALON_HOME override provided: ${KATALON_HOME}"
+            if [ -x "${KATALON_HOME}/katalonc" ]; then
+              KATALON_EXEC="${KATALON_HOME}/katalonc"
+            else
+              echo "ERROR: katalonc not found in KATALON_HOME: ${KATALON_HOME}"
+              exit 3
+            fi
+          else
+            # candidate locations on mac
+            CANDIDATES=(
+              "${HOME}/Downloads/Katalon_Studio_Engine/katalonc"
+              "${HOME}/Downloads/Katalon_Studio_Engine*/katalonc"
+              "/Applications/Katalon_Studio_Engine/katalonc"
+              "/opt/katalon/katalonc"
+            )
 
-          # 2) Locate katalonc - look in common locations (Downloads and /Applications)
-          CANDIDATES=(
-            "${HOME}/Downloads/Katalon_Studio_Engine/katalonc"
-            "${HOME}/Downloads/Katalon_Studio_Engine*/katalonc"
-            "/Applications/Katalon_Studio_Engine/katalonc"
-            "/opt/katalon/katalonc"
-          )
-          KATALON_BIN=""
-          for p in "${CANDIDATES[@]}"; do
-            # shellcheck disable=SC2086
-            for match in $(ls -d ${p} 2>/dev/null || true); do
-              if [ -x "${match}" ]; then
-                KATALON_BIN="${match}"
-                break 2
-              fi
+            KATALON_EXEC=""
+            for p in "${CANDIDATES[@]}"; do
+              # expand globs
+              for f in $p; do
+                if [ -f "$f" ] && [ -x "$f" ]; then
+                  KATALON_EXEC="$f"
+                  break 2
+                fi
+              done
             done
-          done
 
-          # As a fallback, search home Downloads recursively
-          if [ -z "${KATALON_BIN}" ]; then
-            FOUND=$(find "${HOME}/Downloads" -maxdepth 3 -type f -name "katalonc" | head -n 1 || true)
-            if [ -n "${FOUND}" ] && [ -x "${FOUND}" ]; then
-              KATALON_BIN="${FOUND}"
+            # Extra search in ~/Downloads for any katalonc executable (depth 3)
+            if [ -z "$KATALON_EXEC" ]; then
+              FOUND=$(find "${HOME}/Downloads" -maxdepth 3 -type f -name 'katalonc' -perm -u=x 2>/dev/null | head -n 1 || true)
+              if [ -n "$FOUND" ]; then
+                KATALON_EXEC="$FOUND"
+              fi
             fi
           fi
 
-          if [ -z "${KATALON_BIN}" ]; then
-            echo "ERROR: katalonc not found in Downloads or /Applications. Please install Katalon Runtime Engine or place katalonc in ~/Downloads/Katalon_Studio_Engine/."
-            echo "Tried candidates:"
-            printf '%s\n' "${CANDIDATES[@]}"
+          if [ -z "${KATALON_EXEC}" ]; then
+            echo "ERROR: katalonc not found. Please install Katalon Runtime Engine or place katalonc in one of:"
+            printf '  %s\n' "${CANDIDATES[@]}"
+            echo "Or set KATALON_BIN or KATALON_HOME in the pipeline/job config."
             exit 3
           fi
 
-          echo "Using katalonc at: ${KATALON_BIN}"
-          "${KATALON_BIN}" -noSplash -version || true
+          echo "Found katalonc at: ${KATALON_EXEC}"
+          # ensure executable
+          chmod +x "${KATALON_EXEC}" || true
 
-          # 3) Run Katalon (capture output to a log file)
-          KATALON_LOG="${WORKSPACE}/katalon_run.log"
-          rm -f "${KATALON_LOG}" || true
-          echo "Starting Katalon CLI..."
-          # Adjust TEST_SUITE_PATH or add -apiKey="..." if you need to authenticate with TestOps
-          "${KATALON_BIN}" -noSplash -runMode=console \
-            -projectPath="${PROJECT_ABS}" \
-            -retry=0 -testSuitePath="${TEST_SUITE_PATH}" \
-            -executionProfile="default" -browserType="Chrome (headless)" 2>&1 | tee "${KATALON_LOG}"
-          EXIT_CODE=${PIPESTATUS[0]}
-
-          echo "Katalon CLI finished with exit code: ${EXIT_CODE}"
-          echo "---- Last 200 lines of Katalon log ----"
-          tail -n 200 "${KATALON_LOG}" || true
-
-          if [ "${EXIT_CODE}" -ne 0 ]; then
-            echo "Katalon execution FAILED (exit ${EXIT_CODE})"
-            # keep logs for Jenkins artifacts
-            exit ${EXIT_CODE}
+          # locate project file
+          PRJ_FILE=$(find "${WORKSPACE}" -maxdepth 4 -type f -name '*.prj' | head -n 1 || true)
+          if [ -z "${PRJ_FILE}" ]; then
+            echo "ERROR: No .prj file found under workspace (${WORKSPACE})."
+            exit 4
           fi
-          echo "Katalon execution completed successfully."
-        '''
-      }
-    } // stage
+          echo "Found project file: ${PRJ_FILE}"
 
-    stage('Debug: show Reports') {
-      steps {
-        sh '''
-          echo "Listing Reports directory (if created by KRE):"
-          ls -la Reports || true
-          echo "Recursive Reports list (maxdepth 5):"
-          find Reports -maxdepth 5 -type f -print || true
+          # run katalon
+          mkdir -p "${REPORT_DIR}"
+          "${KATALON_EXEC}" -noSplash -runMode=console -projectPath="${PRJ_FILE}" -reportFolder="${REPORT_DIR}" -reportFileName="katalon-report" -browserType="Chrome" || RC=$?
+          # if katalon failed, show exit code and keep artifacts for debugging
+          if [ "${RC:-0}" != "0" ]; then
+            echo "katalonc exited with code ${RC:-0}"
+            exit "${RC:-1}"
+          fi
+
+          echo "Katalon execution finished."
         '''
       }
     }
-  } // stages
+
+    stage('Debug: show Reports') {
+      when {
+        expression { fileExists(env.REPORT_DIR) }
+      }
+      steps {
+        sh 'ls -la ${REPORT_DIR} || true'
+      }
+    }
+  }
 
   post {
     always {
-      // Make sure Jenkins can read reports
-      sh 'chmod -R a+r Reports || true'
-
-      // Archive all reports so you can download them
+      // try to archive if reports present (won't fail job if not)
       archiveArtifacts artifacts: 'Reports/**', allowEmptyArchive: true
-
-      // Publish JUnit results without failing the post step if none are found
-      junit allowEmptyResults: true, testResults: 'Reports/**/JUnit/*.xml'
+      junit allowEmptyResults: true, testResults: 'Reports/**/*.xml'
+      echo "Pipeline finished"
     }
-    success { echo 'Pipeline completed successfully' }
-    failure { echo 'Pipeline failed — check console & archived Reports' }
+    failure {
+      echo "Pipeline failed — check console & archived Reports"
+    }
   }
 }
