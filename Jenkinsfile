@@ -23,10 +23,11 @@ pipeline {
           pwd
           ls -la
 
-          # use safe expansions so -u doesn't fail when vars are unset
+          # initialize
           KATALON_EXEC=""
           RC=0
 
+          # safe expansions so -u won't fail when vars are unset
           if [ -n "${KATALON_BIN:-}" ]; then
             echo "KATALON_BIN override provided: ${KATALON_BIN:-}"
             if [ -x "${KATALON_BIN:-}" ]; then
@@ -61,4 +62,8 @@ pipeline {
             done
 
             if [ -z "$KATALON_EXEC" ]; then
-              FOUND=$(find "${HOM
+              FOUND=$(find "${HOME}/Downloads" -maxdepth 3 -type f -name 'katalonc' -perm -u=x 2>/dev/null | head -n 1 || true)
+              if [ -n "$FOUND" ]; then
+                KATALON_EXEC="$FOUND"
+              fi
+            fi
