@@ -3,59 +3,61 @@ pipeline {
 
   environment {
     REPORT_DIR = 'Reports'
+    // exact folder you provided
+    KATALON_DIR = '/Users/jishathomas/Downloads/Katalon_Studio_Engine_MacOS-9.7.7/Katalon Studio Engine.app/Contents/MacOS'
   }
 
   stages {
     stage('Checkout') {
-      steps {
-        checkout scm
-      }
+      steps { checkout scm }
     }
 
-    stage('Run Katalon Tests') {
+    stage('Run Katalon (using provided MacOS app bundle path)') {
       steps {
         sh '''
           set -euo pipefail
-          echo "=== Jenkins workspace ==="
           echo "Workspace: ${WORKSPACE}"
-          echo "Home: ${HOME}"
-          echo "User: $(whoami)"
-          echo "Looking for katalonc in ~/Downloads/Katalon_Studio_Engine/MacOS"
+          echo "Using KATALON_DIR: ${KATALON_DIR}"
 
-          KATALON_EXEC="${HOME}/Downloads/Katalon_Studio_Engine/MacOS"
-
-          if [ ! -f "${KATALON_EXEC}" ]; then
-            echo "❌ ERROR: katalonc not found at ${KATALON_EXEC}"
-            echo "Please place katalonc at ~/Downloads/Katalon_Studio_Engine/MacOS/katalonc"
-            exit 1
-          fi
-
+          # Prefer katalonc if present, otherwise pick the first executable inside KATALON_DIR
+          KATALON_EXEC="${KATALON_DIR}/katalonc"
           if [ ! -x "${KATALON_EXEC}" ]; then
-            echo "⚙️  Making katalonc executable..."
-            chmod +x "${KATALON_EXEC}" || { echo "Failed to chmod +x katalonc"; exit 2; }
+            echo "katalonc not found/executable at ${KATALON_EXEC}, searching for an executable in ${KATALON_DIR}..."
+            # find first executable file in the directory (non-recursive)
+            FOUND=$(find "${KATALON_DIR}" -maxdepth 1 -type f -perm -u=x 2>/dev/null | head -n 1 || true)
+            if [ -n "${FOUND:-}" ]; then
+              KATALON_EXEC="${FOUND}"
+              echo "Found executable: ${KATALON_EXEC}"
+            else
+              echo "❌ No executable found in ${KATALON_DIR}."
+              echo "List dir:"
+              ls -la "${KATALON_DIR}" || true
+              echo "Please ensure the Katalon Studio Engine app bundle is present and contains an executable inside Contents/MacOS."
+              exit 1
+            fi
+          else
+            echo "Using katalonc at ${KATALON_EXEC}"
           fi
 
-          echo "✅ Found katalonc at ${KATALON_EXEC}"
+          # make sure it's executable
+          if [ ! -x "${KATALON_EXEC}" ]; then
+            echo "Making ${KATALON_EXEC} executable..."
+            chmod +x "${KATALON_EXEC}" || { echo "Failed to chmod +x ${KATALON_EXEC}"; exit 2; }
+          fi
 
-          # find the project file (.prj)
+          # locate project file
           PRJ_FILE=$(find "${WORKSPACE}" -maxdepth 3 -type f -name '*.prj' | head -n 1 || true)
           if [ -z "${PRJ_FILE:-}" ]; then
-            echo "❌ ERROR: No .prj file found in workspace."
+            echo "❌ ERROR: No .prj file found in workspace (${WORKSPACE})"
             exit 3
           fi
-
-          echo "✅ Found project file: ${PRJ_FILE}"
+          echo "Using project file: ${PRJ_FILE}"
 
           mkdir -p "${REPORT_DIR}"
 
-          echo "🚀 Running Katalon tests..."
-          "${KATALON_EXEC}" -noSplash -runMode=console \
-            -projectPath="${PRJ_FILE}" \
-            -reportFolder="${REPORT_DIR}" \
-            -reportFileName="katalon-report" \
-            -browserType="Chrome"
-
-          echo "✅ Katalon test execution completed."
+          echo "Running Katalon engine: ${KATALON_EXEC}"
+          "${KATALON_EXEC}" -noSplash -runMode=console -projectPath="${PRJ_FILE}" -reportFolder="${REPORT_DIR}" -reportFileName="katalon-report" -browserType="Chrome"
+          echo "Katalon execution finished."
         '''
       }
     }
@@ -71,7 +73,7 @@ pipeline {
     always {
       archiveArtifacts artifacts: 'Reports/**', allowEmptyArchive: true
       junit allowEmptyResults: true, testResults: 'Reports/**/*.xml'
-      echo "📦 Pipeline finished. Reports archived if present."
+      echo "Pipeline finished"
     }
   }
 }
