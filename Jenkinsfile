@@ -22,7 +22,7 @@ pipeline {
           echo "User: $(whoami)"
           echo "Looking for katalonc in ~/Downloads/Katalon_Studio_Engine/MacOS"
 
-          KATALON_EXEC="${HOME}/Downloads/Katalon_Studio_Engine/MacOS/katalonc"
+          KATALON_EXEC="${HOME}/Downloads/Katalon_Studio_Engine/MacOS"
 
           if [ ! -f "${KATALON_EXEC}" ]; then
             echo "❌ ERROR: katalonc not found at ${KATALON_EXEC}"
