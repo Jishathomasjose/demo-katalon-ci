@@ -2,56 +2,43 @@ pipeline {
   agent any
 
   environment {
-    REPORT_DIR = 'Reports'
     KATALON_DIR = '/Users/jishathomas/Downloads/Katalon_Studio_Engine_MacOS-9.7.7/Katalon Studio Engine.app/Contents/MacOS'
-    // --- TEMP SAMPLE KEY (replace with your real API key or use Jenkins credentials) ---
-    KATALON_API_KEY = '6a9cb5b7-12f5-45fe-94ae-4dd40128278c'
+    PROJECT_FILE = 'DemoQA_TestProject.prj'
+    TEST_SUITE_PATH = 'Test Suites/TS_SmokeTests'    // 👈 change to your test suite name
+    REPORT_DIR = 'Reports'
+    KATALON_API_KEY = '6a9cb5b7-12f5-45fe-94ae-4dd40128278c'       // 👈 replace with your real Katalon API key
   }
 
   stages {
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        checkout scm
+      }
     }
 
-    stage('Run Katalon Tests') {
+    stage('Run Katalon Test Suite') {
       steps {
         sh '''
-          set -euo pipefail
-          echo "Workspace: ${WORKSPACE}"
-          echo "Using KATALON_DIR: ${KATALON_DIR}"
+          set -e
 
           KATALON_EXEC="${KATALON_DIR}/katalonc"
-          if [ ! -x "${KATALON_EXEC}" ]; then
-            FOUND=$(find "${KATALON_DIR}" -maxdepth 1 -type f -perm -u=x 2>/dev/null | head -n 1 || true)
-            if [ -n "${FOUND:-}" ]; then
-              KATALON_EXEC="${FOUND}"
-              echo "Found executable: ${KATALON_EXEC}"
-            else
-              echo "❌ No katalonc found in ${KATALON_DIR}"; exit 1
-            fi
-          fi
+          PROJECT_PATH="${WORKSPACE}/${PROJECT_FILE}"
 
-          # locate the project
-          PRJ_FILE=$(find "${WORKSPACE}" -maxdepth 3 -type f -name '*.prj' | head -n 1 || true)
-          if [ -z "${PRJ_FILE:-}" ]; then echo "❌ No .prj file found"; exit 3; fi
-          echo "Using project: ${PRJ_FILE}"
-
-          mkdir -p "${REPORT_DIR}"
-
-          echo "🚀 Running Katalon using API key..."
+          echo "Running Katalon test suite: ${TEST_SUITE_PATH}"
           "${KATALON_EXEC}" -noSplash -runMode=console \
-            -projectPath="${PRJ_FILE}" \
+            -projectPath="${PROJECT_PATH}" \
+            -testSuitePath="${TEST_SUITE_PATH}" \
+            -browserType="Chrome (headless)" \
             -apiKey="${KATALON_API_KEY}" \
             -reportFolder="${REPORT_DIR}" \
-            -reportFileName="katalon-report" \
-            -browserType="Chrome"
+            -reportFileName="katalon-report"
         '''
       }
     }
 
     stage('Show Reports') {
       steps {
-        sh 'ls -la ${REPORT_DIR} || echo "No Reports directory created."'
+        sh 'ls -la ${REPORT_DIR} || echo "No Reports generated."'
       }
     }
   }
@@ -60,7 +47,7 @@ pipeline {
     always {
       archiveArtifacts artifacts: 'Reports/**', allowEmptyArchive: true
       junit allowEmptyResults: true, testResults: 'Reports/**/*.xml'
-      echo "Pipeline finished"
+      echo "✅ Katalon pipeline finished."
     }
   }
 }
