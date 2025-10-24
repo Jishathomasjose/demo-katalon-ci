@@ -5,7 +5,7 @@ pipeline {
     REPORT_DIR = 'Reports'
     KATALON_DIR = '/Users/jishathomas/Downloads/Katalon_Studio_Engine_MacOS-9.7.7/Katalon Studio Engine.app/Contents/MacOS'
     // --- TEMP SAMPLE KEY (replace with your real API key or use Jenkins credentials) ---
-    KATALON_API_KEY = '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'
+    KATALON_API_KEY = '6a9cb5b7-12f5-45fe-94ae-4dd40128278c'
   }
 
   stages {
