@@ -2,10 +2,6 @@ pipeline {
   agent any
 
   environment {
-    // Optional overrides (can be left empty)
-    KATALON_BIN = ''
-    KATALON_HOME = ''
-    PROJECT_PATTERN = '**/*.prj'
     REPORT_DIR = 'Reports'
   }
 
@@ -14,56 +10,53 @@ pipeline {
       steps { checkout scm }
     }
 
-    stage('Run Katalon Tests (detect katalonc)') {
+    stage('Run Katalon (from ~/Downloads)') {
       steps {
         sh '''
           set -euo pipefail
-          echo "=== Jenkins workspace ==="
-          echo "WORKSPACE=${WORKSPACE}"
+          echo "Running on: $(whoami) @ $(hostname)"
+          echo "Workspace: ${WORKSPACE}"
           pwd
           ls -la
 
-          # initialize
-          KATALON_EXEC=""
-          RC=0
+          KATALON_EXEC="${HOME}/Downloads/Katalon_Studio_Engine/katalonc"
 
-          # safe expansions so -u won't fail when vars are unset
-          if [ -n "${KATALON_BIN:-}" ]; then
-            echo "KATALON_BIN override provided: ${KATALON_BIN:-}"
-            if [ -x "${KATALON_BIN:-}" ]; then
-              KATALON_EXEC="${KATALON_BIN:-}"
-            else
-              echo "ERROR: KATALON_BIN is set but not executable: ${KATALON_BIN:-}"
-              exit 3
-            fi
-          elif [ -n "${KATALON_HOME:-}" ]; then
-            echo "KATALON_HOME override provided: ${KATALON_HOME:-}"
-            if [ -x "${KATALON_HOME:-}/katalonc" ]; then
-              KATALON_EXEC="${KATALON_HOME:-}/katalonc"
-            else
-              echo "ERROR: katalonc not found in KATALON_HOME: ${KATALON_HOME:-}"
-              exit 3
-            fi
-          else
-            CANDIDATES=(
-              "${HOME}/Downloads/Katalon_Studio_Engine/katalonc"
-              "${HOME}/Downloads/Katalon_Studio_Engine*/katalonc"
-              "/Applications/Katalon_Studio_Engine/katalonc"
-              "/opt/katalon/katalonc"
-            )
+          if [ ! -f "${KATALON_EXEC}" ]; then
+            echo "ERROR: katalonc not found at ${KATALON_EXEC}"
+            echo "Please place katalonc at ~/Downloads/Katalon_Studio_Engine/katalonc"
+            exit 1
+          fi
 
-            for p in "${CANDIDATES[@]}"; do
-              for f in $p; do
-                if [ -f "$f" ] && [ -x "$f" ]; then
-                  KATALON_EXEC="$f"
-                  break 2
-                fi
-              done
-            done
+          if [ ! -x "${KATALON_EXEC}" ]; then
+            echo "ERROR: katalonc found but not executable. Setting +x..."
+            chmod +x "${KATALON_EXEC}" || { echo "Failed to chmod +x"; exit 2; }
+          fi
 
-            if [ -z "$KATALON_EXEC" ]; then
-              FOUND=$(find "${HOME}/Downloads" -maxdepth 3 -type f -name 'katalonc' -perm -u=x 2>/dev/null | head -n 1 || true)
-              if [ -n "$FOUND" ]; then
-                KATALON_EXEC="$FOUND"
-              fi
-            fi
+          PRJ_FILE=$(find "${WORKSPACE}" -maxdepth 4 -type f -name '*.prj' | head -n 1 || true)
+          if [ -z "${PRJ_FILE:-}" ]; then
+            echo "ERROR: No .prj file found in workspace (${WORKSPACE})"
+            exit 3
+          fi
+          echo "Using project: ${PRJ_FILE}"
+
+          mkdir -p "${REPORT_DIR}"
+          "${KATALON_EXEC}" -noSplash -runMode=console -projectPath="${PRJ_FILE}" -reportFolder="${REPORT_DIR}" -reportFileName="katalon-report" -browserType="Chrome"
+        '''
+      }
+    }
+
+    stage('Show Reports (if any)') {
+      steps {
+        sh 'ls -la ${REPORT_DIR} || echo "No Reports directory"'
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts artifacts: 'Reports/**', allowEmptyArchive: true
+      junit allowEmptyResults: true, testResults: 'Reports/**/*.xml'
+      echo "Pipeline finished"
+    }
+  }
+}
