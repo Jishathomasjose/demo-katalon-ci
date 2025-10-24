@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   environment {
-    KATALON_PATH = "/Applications/Katalon_Studio_Engine/katalonc"
+    KATALON_PATH = "/Downloads/Katalon_Studio_Engine/katalonc"
     PROJECT_PATH = "${WORKSPACE}/DemoQA_MacProject.prj"
     TEST_SUITE_PATH = "Test Suites/TS_SmokeTests"
   }
